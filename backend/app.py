@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
-from api.github import router as github_router
+from api.github_connector import router as github_router
 from analyzer.code_analyzer import router as analyzer_router
 from report_generator.generator import router as report_router
 
