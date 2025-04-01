@@ -1,6 +1,9 @@
 """
 Code analysis module for Tech Health
 """
+
+import json
+import requests
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
@@ -83,7 +86,7 @@ def calculate_cyclomatic_complexity(code: str) -> float:
     except Exception as e:
         print(f"Error calculating cyclomatic complexity: {e}")
         return 0.0
-
+    
 def calculate_maintainability_index(code: str) -> float:
     """
     Calculate the maintainability index of the code
@@ -567,139 +570,135 @@ async def compare_with_benchmarks(owner: str, repo: str, access_token: str):
 @router.get("/suggestions", response_model=Dict)
 async def get_improvement_suggestions(owner: str, repo: str, access_token: str):
     """
-    Get detailed suggestions for improving repository health
+    Get dynamic improvement suggestions using AI
     """
     try:
         analysis = await analyze_repository(owner, repo, access_token)
         
-        suggestions = {
-            "high_priority": [],
-            "medium_priority": [],
-            "low_priority": [],
-            "estimated_effort": {}
-        }
+        full_prompt = f"""You are an AI code quality expert analyzing a software repository. 
+Provide actionable, insightful suggestions for improving the repository's technical health.
 
-        # TODO: change this suggestions to use an AI model to generate them
+Repository: {owner}/{repo}
+
+Code Quality Metrics:
+- Cyclomatic Complexity: {analysis.code_quality.cyclomatic_complexity}
+- Maintainability Index: {analysis.code_quality.maintainability_index}
+- Lines of Code: {analysis.code_quality.lines_of_code}
+- Comment Ratio: {analysis.code_quality.comment_ratio}%
+- Test Coverage: {analysis.code_quality.test_coverage}%
+
+Commit Frequency Metrics:
+- Daily Commit Average: {analysis.commit_frequency.daily_average}
+- Weekly Commit Average: {analysis.commit_frequency.weekly_average}
+- Contributors Count: {analysis.commit_frequency.contributors_count}
+- Development Trend: {analysis.commit_frequency.trend}
+
+Technical Debt Metrics:
+- Debt Ratio: {analysis.tech_debt.debt_ratio}%
+- Estimated Hours to Address: {analysis.tech_debt.estimated_hours}
+- Critical Files: {', '.join(analysis.tech_debt.critical_files[:3]) if analysis.tech_debt.critical_files else 'None'}
+
+Overall Score: {analysis.overall_score}/100
+
+IMPORTANT: Respond ONLY with a valid JSON object in this EXACT format:
+{{
+    "high_priority": [
+        {{
+            "category": "code_quality/testing/development_activity/team/tech_debt",
+            "title": "Suggestion title",
+            "description": "Detailed explanation of the suggestion",
+            "impact": "High"
+        }}
+    ],
+    "medium_priority": [
+        {{
+            "category": "code_quality/testing/development_activity/team/tech_debt",
+            "title": "Suggestion title",
+            "description": "Detailed explanation of the suggestion",
+            "impact": "Medium"
+        }}
+    ],
+    "low_priority": [
+        {{
+            "category": "code_quality/testing/development_activity/team/tech_debt",
+            "title": "Suggestion title",
+            "description": "Detailed explanation of the suggestion",
+            "impact": "Low"
+        }}
+    ],
+    "estimated_effort": {{
+        "hours": 20,
+        "developer_weeks": 0.5,
+        "approximate_cost": "$2,000 - $3,000",
+        "suggestion_count": {{
+            "high_priority": 2,
+            "medium_priority": 1,
+            "low_priority": 1,
+            "total": 4
+        }}
+    }}
+}}"""
+
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "model": "llama3.1:latest", 
+            "prompt": full_prompt, 
+            "stream": False
+        }
         
-        if analysis.code_quality.cyclomatic_complexity > 15:
-            suggestions["high_priority"].append({
-                "category": "code_quality",
-                "title": "Reduce code complexity in critical files",
-                "description": "High cyclomatic complexity ({}), indicates code that is difficult to understand, test, and maintain. Refactor complex functions into smaller, more manageable pieces.".format(analysis.code_quality.cyclomatic_complexity),
-                "impact": "High"
-            })
-        elif analysis.code_quality.cyclomatic_complexity > 10:
-            suggestions["medium_priority"].append({
-                "category": "code_quality",
-                "title": "Consider reducing code complexity",
-                "description": "Moderate cyclomatic complexity ({}), could be improved by refactoring complex methods.".format(analysis.code_quality.cyclomatic_complexity),
-                "impact": "Medium"
-            })
+        try:
+            #FIXME: here you can add the own AI call, for example we use a ollama open source to generate the suggestions
+            response = requests.post(
+                "http://177.54.33.222:11434/api/generate", 
+                headers=headers, 
+                data=json.dumps(data),
+                timeout=120
+            )
+            
+            if response.status_code != 200:
+                print(f"AI suggestion generation failed: {response.text}")
+                return _generate_fallback_suggestions(analysis)
+            
+            result = response.json()
+            
+            try:
+                response_text = result.get('response', '{}')
+                
+                response_text = response_text.strip('`')
+                
+                suggestions = json.loads(response_text)
+                
+                required_keys = ['high_priority', 'medium_priority', 'low_priority', 'estimated_effort']
+                if not all(key in suggestions for key in required_keys):
+                    print(f"Missing required keys. Found: {suggestions.keys()}")
+                    raise ValueError("Invalid suggestion structure")
+                
+                return suggestions
+            
+            except (json.JSONDecodeError, ValueError) as parse_error:
+                print(f"Error parsing AI suggestions: {parse_error}")
+                print(f"Raw response: {result.get('response', 'No response')}")
+                return _generate_fallback_suggestions(analysis)
         
-        if analysis.code_quality.maintainability_index < 65:
-            suggestions["high_priority"].append({
-                "category": "code_quality",
-                "title": "Improve code maintainability",
-                "description": "Low maintainability index ({}), indicates code that is difficult to maintain. Focus on improving code structure, reducing complexity, and increasing documentation.".format(analysis.code_quality.maintainability_index),
-                "impact": "High"
-            })
-        elif analysis.code_quality.maintainability_index < 75:
-            suggestions["medium_priority"].append({
-                "category": "code_quality",
-                "title": "Enhance code maintainability",
-                "description": "Moderate maintainability index ({}), could be improved with better documentation and code structure.".format(analysis.code_quality.maintainability_index),
-                "impact": "Medium"
-            })
-        
-        if analysis.code_quality.comment_ratio < 5:
-            suggestions["high_priority"].append({
-                "category": "code_quality",
-                "title": "Significantly increase code documentation",
-                "description": "Very low comment ratio ({}%), makes code difficult for new developers to understand. Add meaningful comments to explain complex logic, business rules, and important decisions.".format(analysis.code_quality.comment_ratio),
-                "impact": "High"
-            })
-        elif analysis.code_quality.comment_ratio < 10:
-            suggestions["medium_priority"].append({
-                "category": "code_quality",
-                "title": "Improve code documentation",
-                "description": "Low comment ratio ({}%), could be improved to enhance code readability and maintenance.".format(analysis.code_quality.comment_ratio),
-                "impact": "Medium"
-            })
-        
-        if analysis.code_quality.test_coverage < 50:
-            suggestions["high_priority"].append({
-                "category": "testing",
-                "title": "Increase test coverage",
-                "description": "Low test coverage ({}%), indicates high risk of introducing regressions with new changes. Add unit and integration tests for critical components.".format(analysis.code_quality.test_coverage),
-                "impact": "High"
-            })
-        elif analysis.code_quality.test_coverage < 70:
-            suggestions["medium_priority"].append({
-                "category": "testing",
-                "title": "Improve test coverage",
-                "description": "Moderate test coverage ({}%), should be improved to enhance code reliability.".format(analysis.code_quality.test_coverage),
-                "impact": "Medium"
-            })
-        
-        if analysis.commit_frequency.trend == "decreasing":
-            suggestions["high_priority"].append({
-                "category": "development_activity",
-                "title": "Address declining development activity",
-                "description": "Commit frequency is decreasing, which may indicate reduced development velocity or project health issues.",
-                "impact": "High"
-            })
-        
-        if analysis.commit_frequency.weekly_average < 3:
-            suggestions["medium_priority"].append({
-                "category": "development_activity",
-                "title": "Increase development velocity",
-                "description": "Low commit frequency (average {} commits per week), may indicate low development activity.".format(analysis.commit_frequency.weekly_average),
-                "impact": "Medium"
-            })
-        
-        if analysis.commit_frequency.contributors_count < 2:
-            suggestions["high_priority"].append({
-                "category": "team",
-                "title": "Increase the number of contributors",
-                "description": "Having only {} contributor(s) creates a bus factor risk. Onboard additional developers to the project.".format(analysis.commit_frequency.contributors_count),
-                "impact": "High"
-            })
-        elif analysis.commit_frequency.contributors_count < 4:
-            suggestions["low_priority"].append({
-                "category": "team",
-                "title": "Consider expanding the contributor base",
-                "description": "Having {} contributors could be improved to distribute knowledge and reduce risk.".format(analysis.commit_frequency.contributors_count),
-                "impact": "Low"
-            })
-        
-        if analysis.tech_debt.debt_ratio > 50:
-            suggestions["high_priority"].append({
-                "category": "tech_debt",
-                "title": "Address significant technical debt",
-                "description": "High technical debt ratio ({}%), indicates substantial maintenance burden. Address critical files identified in the analysis.".format(analysis.tech_debt.debt_ratio),
-                "impact": "High"
-            })
-        elif analysis.tech_debt.debt_ratio > 30:
-            suggestions["medium_priority"].append({
-                "category": "tech_debt",
-                "title": "Reduce technical debt",
-                "description": "Moderate technical debt ratio ({}%), should be addressed to improve maintainability.".format(analysis.tech_debt.debt_ratio),
-                "impact": "Medium"
-            })
-        
-        if analysis.tech_debt.critical_files:
-            suggestions["high_priority"].append({
-                "category": "tech_debt",
-                "title": "Refactor critical files",
-                "description": "These files have high technical debt and should be prioritized for refactoring: {}".format(", ".join(analysis.tech_debt.critical_files[:3])),
-                "impact": "High"
-            })
-        
-        high_count = len(suggestions["high_priority"])
-        medium_count = len(suggestions["medium_priority"])
-        low_count = len(suggestions["low_priority"])
-        
-        suggestions["estimated_effort"] = {
+        except requests.RequestException as req_error:
+            print(f"Request to AI service failed: {req_error}")
+            return _generate_fallback_suggestions(analysis)
+    
+    except Exception as e:
+        print(f"Error generating suggestions: {e}")
+        import traceback
+        traceback.print_exc()
+        return _generate_fallback_suggestions(analysis)
+
+def _generate_fallback_suggestions(analysis):
+    """
+    Generate fallback static suggestions if AI generation fails
+    """
+    suggestions = {
+        "high_priority": [],
+        "medium_priority": [],
+        "low_priority": [],
+        "estimated_effort": {
             "hours": analysis.tech_debt.estimated_hours,
             "developer_weeks": round(analysis.tech_debt.estimated_hours / 40, 1),
             "approximate_cost": "${:,.0f} - ${:,.0f}".format(
@@ -707,17 +706,51 @@ async def get_improvement_suggestions(owner: str, repo: str, access_token: str):
                 analysis.tech_debt.estimated_hours * 150 
             ),
             "suggestion_count": {
-                "high_priority": high_count,
-                "medium_priority": medium_count,
-                "low_priority": low_count,
-                "total": high_count + medium_count + low_count
+                "high_priority": 0,
+                "medium_priority": 0,
+                "low_priority": 0,
+                "total": 0
             }
         }
-        
-        return suggestions
+    }
     
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating suggestions: {str(e)}"
-        )
+    if analysis.code_quality.cyclomatic_complexity > 15:
+        suggestions["high_priority"].append({
+            "category": "code_quality",
+            "title": "Reduce code complexity in critical files",
+            "description": f"High cyclomatic complexity ({analysis.code_quality.cyclomatic_complexity}), indicates code that is difficult to understand, test, and maintain. Refactor complex functions into smaller, more manageable pieces.",
+            "impact": "High"
+        })
+    
+    if analysis.code_quality.maintainability_index < 65:
+        suggestions["high_priority"].append({
+            "category": "code_quality",
+            "title": "Improve code maintainability",
+            "description": f"Low maintainability index ({analysis.code_quality.maintainability_index}), indicates code that is difficult to maintain. Focus on improving code structure, reducing complexity, and increasing documentation.",
+            "impact": "High"
+        })
+    
+    if analysis.code_quality.comment_ratio < 10:
+        suggestions["medium_priority"].append({
+            "category": "code_quality",
+            "title": "Improve code documentation",
+            "description": f"Low comment ratio ({analysis.code_quality.comment_ratio}%), could be improved to enhance code readability and maintenance.",
+            "impact": "Medium"
+        })
+    
+    if analysis.commit_frequency.trend == "decreasing":
+        suggestions["high_priority"].append({
+            "category": "development_activity",
+            "title": "Address declining development activity",
+            "description": "Commit frequency is decreasing, which may indicate reduced development velocity or project health issues.",
+            "impact": "High"
+        })
+    
+    suggestions["estimated_effort"]["suggestion_count"] = {
+        "high_priority": len(suggestions["high_priority"]),
+        "medium_priority": len(suggestions["medium_priority"]),
+        "low_priority": len(suggestions["low_priority"]),
+        "total": len(suggestions["high_priority"]) + len(suggestions["medium_priority"]) + len(suggestions["low_priority"])
+    }
+    
+    return suggestions

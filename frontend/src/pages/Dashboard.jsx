@@ -177,12 +177,6 @@ const Dashboard = () => {
                           <Icon as={FiFileText} boxSize={6} color="blue.500" />
                           <VStack align="start" flex={1} spacing={0}>
                             <Text fontWeight="bold">{report.repository}</Text>
-                            <Text fontSize="sm" color="gray.500">
-                              Generated on{" "}
-                              {new Date(
-                                report.generated_at
-                              ).toLocaleDateString()}
-                            </Text>
                           </VStack>
                           <Badge colorScheme="blue">
                             {report.format.toUpperCase()}
