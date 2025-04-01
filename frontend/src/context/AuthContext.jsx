@@ -16,7 +16,7 @@ export const AuthProvider = ({ children }) => {
     const validateToken = async () => {
       if (githubToken) {
         try {
-          const response = await axios.post("/api/github/connect", {
+          const response = await axios.post("http://localhost:8000/api/github/connect", {
             access_token: githubToken,
           });
 
@@ -42,7 +42,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (token) => {
     setLoading(true);
     try {
-      const response = await axios.post("/api/github/connect", {
+      const response = await axios.post("http://localhost:8000/api/github/connect", {
         access_token: token,
       });
 
