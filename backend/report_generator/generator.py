@@ -48,68 +48,110 @@ os.makedirs(template_dir, exist_ok=True)
 
 def create_pdf_report(template_data, report_path):
     """
-    Create a PDF report using ReportLab
+    Create a PDF report using ReportLab with more robust error handling
     """
-    doc = SimpleDocTemplate(report_path, pagesize=letter, 
-                            rightMargin=72, leftMargin=72, 
-                            topMargin=72, bottomMargin=18)
+    try:
+        doc = SimpleDocTemplate(report_path, pagesize=letter, 
+                                rightMargin=72, leftMargin=72, 
+                                topMargin=72, bottomMargin=18)
+        
+        styles = getSampleStyleSheet()
+        
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+        
+        title_style = ParagraphStyle(
+            'CustomTitle', 
+            parent=styles['Title'], 
+            fontSize=16,
+            textColor=Color(0.16, 0.24, 0.31, 1),
+            alignment=TA_CENTER
+        )
+        
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle', 
+            parent=styles['Normal'], 
+            fontSize=10,
+            textColor=Color(0.5, 0.5, 0.5, 1),
+            alignment=TA_CENTER
+        )
+        
+        content = []
+        
+        content.append(Paragraph("Tech Health Report", title_style))
+        content.append(Spacer(1, 12))
+        
+        content.append(Paragraph(f"Repository: {template_data.get('repository_name', 'Unknown Repository')}", subtitle_style))
+        content.append(Paragraph(f"Generated on {template_data.get('generated_at', 'Unknown Date')}", subtitle_style))
+        content.append(Spacer(1, 12))
+        
+        content.append(Paragraph("Executive Summary", styles['Heading2']))
+        overall_score = template_data.get('overall_score', 'N/A')
+        content.append(Paragraph(f"Overall Health Score: {overall_score}/100", styles['Normal']))
+        
+        def safe_get_attr(obj, attr, default='N/A'):
+            try:
+                return getattr(obj, attr, default)
+            except Exception:
+                return default
+        
+        code_quality = template_data.get('code_quality', {})
+        commit_frequency = template_data.get('commit_frequency', {})
+        tech_debt = template_data.get('tech_debt', {})
+        
+        content.append(Paragraph("Code Quality Analysis", styles['Heading2']))
+        
+        code_quality_data = [
+            ['Metric', 'Value', 'Rating'],
+            ['Cyclomatic Complexity', 
+             str(safe_get_attr(code_quality, 'cyclomatic_complexity', 'N/A')), 
+             'Good' if (safe_get_attr(code_quality, 'cyclomatic_complexity', 0) <= 10) else 'Poor'],
+            ['Maintainability Index', 
+             str(safe_get_attr(code_quality, 'maintainability_index', 'N/A')), 
+             'Good' if (safe_get_attr(code_quality, 'maintainability_index', 0) >= 70) else 'Poor'],
+            ['Test Coverage', 
+             f"{safe_get_attr(code_quality, 'test_coverage', 'N/A')}%", 
+             'Good' if (safe_get_attr(code_quality, 'test_coverage', 0) >= 70) else 'Poor']
+        ]
+        
+        code_quality_table = Table(code_quality_data, colWidths=[200, 100, 100])
+        code_quality_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.grey),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 12),
+            ('BOTTOMPADDING', (0,0), (-1,0), 12),
+            ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+            ('GRID', (0,0), (-1,-1), 1, colors.black)
+        ]))
+        content.append(code_quality_table)
+        
+        content.append(Paragraph("Technical Debt Analysis", styles['Heading2']))
+        content.append(Paragraph(f"Debt Ratio: {safe_get_attr(tech_debt, 'debt_ratio', 'N/A')}%", styles['Normal']))
+        
+        recommendations = template_data.get('recommendations', [])
+        if recommendations:
+            content.append(Paragraph("Recommendations", styles['Heading2']))
+            recommendation_list = []
+            for rec in recommendations:
+                recommendation_list.append(Paragraph(rec, styles['Normal']))
+            content.extend(recommendation_list)
+        
+        doc.build(content)
     
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'Title', 
-        parent=styles['Title'], 
-        textColor=Color(0.16, 0.24, 0.31, 1)
-    )
-    
-    subtitle_style = ParagraphStyle(
-        'Subtitle', 
-        parent=styles['Subtitle'], 
-        textColor=Color(0.5, 0.5, 0.5, 1)
-    )
-    
-    content = []
-    
-    content.append(Paragraph(f"Tech Health Report: {template_data['repository_name']}", title_style))
-    content.append(Spacer(1, 12))
-    content.append(Paragraph(f"Generated on {template_data['generated_at']}", subtitle_style))
-    content.append(Spacer(1, 12))
-    
-    content.append(Paragraph("Executive Summary", styles['Heading2']))
-    content.append(Paragraph(f"Overall Health Score: {template_data['overall_score']}/100", styles['Normal']))
-    
-    content.append(Paragraph("Code Quality Analysis", styles['Heading2']))
-    
-    code_quality_data = [
-        ['Metric', 'Value', 'Rating'],
-        ['Cyclomatic Complexity', 
-         str(template_data['code_quality']['cyclomatic_complexity']), 
-         'Good' if template_data['code_quality']['cyclomatic_complexity'] <= 10 else 'Poor'],
-        ['Maintainability Index', 
-         str(template_data['code_quality']['maintainability_index']), 
-         'Good' if template_data['code_quality']['maintainability_index'] >= 70 else 'Poor'],
-        ['Test Coverage', 
-         f"{template_data['code_quality']['test_coverage']}%", 
-         'Good' if template_data['code_quality']['test_coverage'] >= 70 else 'Poor']
-    ]
-    
-    code_quality_table = Table(code_quality_data, colWidths=[200, 100, 100])
-    code_quality_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.grey),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 12),
-        ('BOTTOMPADDING', (0,0), (-1,0), 12),
-        ('BACKGROUND', (0,1), (-1,-1), colors.beige),
-        ('GRID', (0,0), (-1,-1), 1, colors.black)
-    ]))
-    content.append(code_quality_table)
-    
-    content.append(Paragraph("Technical Debt Analysis", styles['Heading2']))
-    content.append(Paragraph(f"Debt Ratio: {template_data['tech_debt']['debt_ratio']}%", styles['Normal']))
-    
-    doc.build(content)
+    except Exception as e:
+        print(f"Error creating PDF report: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        doc = SimpleDocTemplate(report_path, pagesize=letter)
+        content = [
+            Paragraph("Error Generating Report", styles['Heading1']),
+            Paragraph(f"An error occurred: {str(e)}", styles['Normal'])
+        ]
+        doc.build(content)
+
 
 @router.post("/generate", response_model=ReportMetadata)
 async def generate_report(request: ReportRequest):

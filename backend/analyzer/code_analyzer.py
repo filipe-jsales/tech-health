@@ -1,10 +1,6 @@
 """
 Code analysis module for Tech Health
 """
-import os
-import tempfile
-import subprocess
-import json
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
@@ -13,8 +9,7 @@ import radon.complexity as radon_cc
 import radon.metrics as radon_metrics
 from radon.raw import analyze
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 
 router = APIRouter()
 
@@ -68,16 +63,20 @@ def calculate_cyclomatic_complexity(code: str) -> float:
     try:
         import re
         
-        def parse_block(block):
+        def safe_cc_visit(block):
             try:
                 results = radon_cc.cc_visit(block)
                 return sum(result.complexity for result in results) / len(results) if results else 0.0
             except Exception:
                 return 0.0
         
-        function_pattern = re.compile(r'^def\s+\w+\s*\(.*\)\s*:', re.MULTILINE)
-        function_blocks = function_pattern.split(code)
-        complexities = [parse_block(block) for block in function_blocks if block.strip()]
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
+        code = re.sub(r'(["\'])(?:\\.|.)*?\1', '', code)
+        code = re.sub(r'function\s+(\w+)\s*\((.*?)\)\s*$', r'function \1(\2) {}', code, flags=re.MULTILINE)
+        function_pattern = re.compile(r'(function\s+\w+\s*\(.*?\)\s*{.*?}|=>\s*{.*?})', re.DOTALL)
+        function_blocks = function_pattern.findall(code)
+        complexities = [safe_cc_visit(block) for block in function_blocks if block.strip()]
         
         return sum(complexities) / len(complexities) if complexities else 0.0
     
@@ -90,6 +89,12 @@ def calculate_maintainability_index(code: str) -> float:
     Calculate the maintainability index of the code
     """
     try:
+        import re
+        
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        code = re.sub(r'//.*$', '', code, flags=re.MULTILINE)
+        code = re.sub(r'(["\'])(?:\\.|.)*?\1', '', code)
+        
         mi = radon_metrics.mi_visit(code, multi=True)
         return mi if mi else 0.0
     except Exception as e:
@@ -166,9 +171,6 @@ def analyze_commit_frequency(commits: List[Dict]) -> CommitFrequencyMetrics:
     
     date_range = max(date_range, 1)
     
-    daily_commits = df.groupby(df['date'].dt.date).size()
-    weekly_commits = df.groupby(pd.Grouper(key='date', freq='W')).size()
-    monthly_commits = df.groupby(pd.Grouper(key='date', freq='M')).size()
     
     daily_avg = len(df) / date_range
     weekly_avg = len(df) / (date_range / 7) if date_range >= 7 else daily_avg * 7
@@ -214,33 +216,54 @@ def estimate_tech_debt(files: Dict[str, str]) -> TechDebtMetrics:
     total_loc = 0
     
     for filename, content in files.items():
+        if not content or len(content.strip()) < 10:
+            continue
+        
         if not any(filename.endswith(ext) for ext in ['.py', '.js', '.java', '.cs', '.php', '.rb', '.go']):
             continue
         
-        raw_metrics = analyze(content)
-        loc = raw_metrics.loc
-        total_loc += loc
+        try:
+            try:
+                if filename.endswith('.js'):
+                    import re
+                    content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+                    content = re.sub(r'//.*$', '', content, flags=re.MULTILINE)
+                
+                raw_metrics = analyze(content)
+                loc = raw_metrics.loc
+                total_loc += loc
+            except Exception as raw_error:
+                print(f"Warning: Could not analyze raw metrics for {filename}. Error: {raw_error}")
+                loc = len(content.splitlines())
+                total_loc += loc
+            
+            cc = calculate_cyclomatic_complexity(content)
+            mi = calculate_maintainability_index(content)
+            
+            comment_ratio = 0
+            try:
+                comment_lines = len([line for line in content.splitlines() if line.strip().startswith('//') or line.strip().startswith('/*')])
+                comment_ratio = (comment_lines / loc * 100) if loc > 0 else 0
+            except Exception:
+                pass
+            
+            complexity_debt = min(100, max(0, (cc - 5) * 10)) if cc > 5 else 0
+            docs_debt = min(100, max(0, (10 - comment_ratio) * 5)) if comment_ratio < 10 else 0
+            architecture_debt = min(100, max(0, (100 - mi)))
+            
+            file_debt = (complexity_debt + docs_debt + architecture_debt) / 3
+            debt_by_file[filename] = file_debt
+            
+            debt_by_category["code_complexity"] += complexity_debt * loc
+            debt_by_category["documentation"] += docs_debt * loc
+            debt_by_category["architecture"] += architecture_debt * loc
+            
+            if file_debt > 60 and loc > 100:
+                critical_files.append(filename)
         
-        cc = calculate_cyclomatic_complexity(content)
-        mi = calculate_maintainability_index(content)
-        comment_ratio = (raw_metrics.comments / raw_metrics.sloc * 100) if raw_metrics.sloc > 0 else 0
-        
-        complexity_debt = min(100, max(0, (cc - 5) * 10)) if cc > 5 else 0
-        docs_debt = min(100, max(0, (10 - comment_ratio) * 5)) if comment_ratio < 10 else 0
-        
-        #FIXME Architecture debt is a placeholder for MVP
-        #FIXME  In a real implementation, this would analyze imports, dependencies, etc.
-        architecture_debt = min(100, max(0, (100 - mi)))
-        
-        file_debt = (complexity_debt + docs_debt + architecture_debt) / 3
-        debt_by_file[filename] = file_debt
-        
-        debt_by_category["code_complexity"] += complexity_debt * loc
-        debt_by_category["documentation"] += docs_debt * loc
-        debt_by_category["architecture"] += architecture_debt * loc
-        
-        if file_debt > 60 and loc > 100:
-            critical_files.append(filename)
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
+            continue
     
     for category in debt_by_category:
         debt_by_category[category] = round(debt_by_category[category] / total_loc if total_loc > 0 else 0, 2)
@@ -269,32 +292,40 @@ async def analyze_repository(owner: str, repo: str, access_token: str):
         while contents:
             file_content = contents.pop(0)
             if file_content.type == "dir":
-                contents.extend(repository.get_contents(file_content.path))
+                try:
+                    contents.extend(repository.get_contents(file_content.path))
+                except Exception as dir_error:
+                    print(f"Error processing directory {file_content.path}: {dir_error}")
+                    continue
             else:
                 try:
                     if any(file_content.name.endswith(ext) for ext in [
                         '.py', '.js', '.java', '.cs', '.php', '.rb', '.go',
                         '.html', '.css', '.md', '.txt', '.json', '.xml', '.yaml', '.yml'
                     ]):
-                        # Decode only if content is not too large
-                        if file_content.size < 1_000_000:  # 1MB limit
-                            decoded_content = file_content.decoded_content.decode('utf-8', errors='ignore')
-                            # Ignore empty or minimal files
-                            if len(decoded_content.strip()) > 10:
-                                files[file_content.path] = decoded_content
-                except Exception as e:
-                    print(f"Error processing file {file_content.path}: {e}")
+                        if file_content.size < 1_000_000:
+                            try:
+                                decoded_content = file_content.decoded_content.decode('utf-8', errors='ignore')
+                                if len(decoded_content.strip()) > 10:
+                                    files[file_content.path] = decoded_content
+                            except Exception as decode_error:
+                                print(f"Error decoding {file_content.path}: {decode_error}")
+                except Exception as file_error:
+                    print(f"Error processing file {file_content.path}: {file_error}")
                     continue
         
         commits_data = []
-        commits = repository.get_commits()
-        for commit in commits:
-            commits_data.append({
-                "sha": commit.sha,
-                "message": commit.commit.message,
-                "author": commit.commit.author.name,
-                "date": commit.commit.author.date.isoformat()
-            })
+        try:
+            commits = repository.get_commits()
+            for commit in commits:
+                commits_data.append({
+                    "sha": commit.sha,
+                    "message": commit.commit.message,
+                    "author": commit.commit.author.name,
+                    "date": commit.commit.author.date.isoformat()
+                })
+        except Exception as commits_error:
+            print(f"Error fetching commits: {commits_error}")
         
         code_quality = analyze_code_quality(files)
         commit_frequency = analyze_commit_frequency(commits_data)
@@ -313,7 +344,7 @@ async def analyze_repository(owner: str, repo: str, access_token: str):
             overall_score = quality_score + commit_score + debt_score
         except Exception as score_error:
             print(f"Error calculating overall score: {score_error}")
-            overall_score = 50.0  #default middle score
+            overall_score = 50.0
         
         recommendations = []
         
@@ -329,7 +360,7 @@ async def analyze_repository(owner: str, repo: str, access_token: str):
         if commit_frequency.trend == "decreasing":
             recommendations.append("Increase development activity")
         
-        if len(tech_debt.critical_files) > 0:
+        if tech_debt.critical_files:
             recommendations.append(f"Focus on refactoring these critical files: {', '.join(tech_debt.critical_files[:3])}")
         
         result = AnalysisResult(
@@ -345,6 +376,9 @@ async def analyze_repository(owner: str, repo: str, access_token: str):
         return result
     
     except Exception as e:
+        print(f"Repository analysis error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error analyzing repository: {str(e)}"
@@ -544,6 +578,8 @@ async def get_improvement_suggestions(owner: str, repo: str, access_token: str):
             "low_priority": [],
             "estimated_effort": {}
         }
+
+        # TODO: change this suggestions to use an AI model to generate them
         
         if analysis.code_quality.cyclomatic_complexity > 15:
             suggestions["high_priority"].append({
