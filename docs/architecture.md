@@ -20,6 +20,8 @@ O componente de integração é responsável por conectar o Tech Health a reposi
 - PyGithub para integração com GitHub
 - OAuth para autenticação segura
 
+![Dashboard de Análise](image.png)
+
 ### 2. Motor de Análise
 
 O motor de análise processa os dados extraídos da API de integração e executa análises detalhadas para determinar a saúde tecnológica do projeto.
@@ -56,4 +58,27 @@ O gerador de relatório transforma os resultados da análise em um documento vis
 2. **Processamento**: O Motor de Análise processa os dados brutos e calcula métricas
 3. **Comparação**: As métricas são comparadas com benchmarks do setor
 4. **Recomendação**: Recomendações são geradas com base na análise
-5. **Visualização**: O Gerador
+
+## Uso de Ferramentas de IA
+
+Durante o desenvolvimento deste projeto, várias ferramentas de IA foram utilizadas para aumentar a produtividade e melhorar a qualidade do código:
+
+### Claude (Anthropic)
+
+- **Propósito**: Auxiliou na criação e refinamento da documentação, incluindo este README
+- **Benefício**: Permitiu uma documentação clara e abrangente, economizando tempo na elaboração da estrutura e revisão do conteúdo
+- **Casos de uso específicos**: Estruturação da arquitetura do sistema, formatação do README e descrição detalhada dos componentes
+
+### V0
+
+- **Propósito**: Utilizado para desenvolver e otimizar a interface do usuário e elementos de frontend
+- **Benefício**: Acelerou o desenvolvimento das páginas de visualização e do dashboard, permitindo iterações rápidas
+- **Casos de uso específicos**: Criação de componentes visuais para o dashboard de análise e para a visualização de relatórios
+
+### Ollama
+
+- **Propósito**: Utilizado para gerar sugestões de código e recomendações técnicas
+- **Benefício**: Ajudou a identificar oportunidades de melhoria de código e forneceu recomendações inteligentes para o motor de análise
+- **Casos de uso específicos**: Desenvolvimento de algoritmos para análise de qualidade de código e estimativa de dívida técnica, geração de recomendações personalizadas baseadas nos resultados da análise
+
+Estas ferramentas foram essenciais para cumprir o objetivo de desenvolver um MVP funcional no tempo alvo de 3-5 horas, permitindo um foco maior na arquitetura e funcionalidades core do sistema ao invés de detalhes de implementação.

@@ -1,5 +1,8 @@
 # Tech Health - Technical Due Diligence Tool
 
+![Demonstração](2025-04-05-12-16-54_902G7gxM-ezgif.com-video-to-gif-converter.gif)
+
+
 Tech Health é um MVP que audita a base de código de startups e gera um apêndice de "Saúde Tecnológica" para pitch decks, ajudando startups a demonstrarem robustez técnica para investidores.
 
 ## 🚀 Visão Geral
